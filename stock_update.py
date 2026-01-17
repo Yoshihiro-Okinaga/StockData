@@ -135,7 +135,7 @@ def build_configs_from_stockfxlist(base_dir: Path, stockfxlist_path: Path) -> li
         if decimals_opt is not None:
             decimals: Optional[int] = int(decimals_opt)
         elif stock_type == "StockAverage":
-            decimals = 3
+            decimals = None
         elif stock_type == "Stock":
             decimals = None
         else:
@@ -230,6 +230,12 @@ def _fmt_fixed(x, decimals: int) -> str:
     return f"{float(x):.{decimals}f}"
 
 
+def _fmt_round_3_and_pad(x) -> str:
+    if pd.isna(x):
+        return ""
+    d = Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return f"{d:.3f}"
+
 # =========================
 # CSV 読み書き
 # =========================
@@ -268,7 +274,7 @@ def save_price_csv(df: pd.DataFrame, csv_path: Path, decimals: Optional[int], st
         # 価格列の整形（可変 or 固定）
         for col in PRICE_COLUMNS:
             if decimals is None:
-                out[col] = out[col].apply(_fmt_variable_number)  # 1438.0 -> 1438
+                out[col] = out[col].apply(_fmt_stock_price_0_or_1dp)
             else:
                 out[col] = out[col].apply(lambda v: _fmt_fixed(v, decimals))  # 0埋め固定
 
@@ -298,9 +304,9 @@ def save_price_csv(df: pd.DataFrame, csv_path: Path, decimals: Optional[int], st
     # 価格整形
     if decimals is None:
         # Stock: 0 or 1dp ルール
-        if stock_type == "Stock":
+        if stock_type == "StockAverage":
             for col in PRICE_COLUMNS:
-                out[col] = out[col].apply(_fmt_stock_price_0_or_1dp)
+                out[col] = out[col].apply(_fmt_round_3_and_pad)
         else:
             for col in PRICE_COLUMNS:
                 out[col] = out[col].apply(_fmt_variable_number)
