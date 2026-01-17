@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import re
+import json
 import time
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -34,118 +34,51 @@ class SeriesConfig:
 
 
 # =========================
-# ティッカー推測
+# 設定読み込み (JSON)
 # =========================
-
-_fx_pair_re = re.compile(r"^[A-Z]{3}_[A-Z]{3}$")
-_jp_stock_re = re.compile(r"^(?P<code>\d{4})_")  # 例: 1963_日揮ホールディングス
-
-SPECIAL_TICKER_MAP = {
-    "日経平均": "^N225",
-    "GOLD_USD": "GC=F",
-    "OIL_USD": "CL=F",
-    "JAPAN255_Futures": "NIY=F",
-    "US30_Futures": "YM=F",
-    "SILVER_USD": "SI=F",
-    "PLATINUM_USD": "PL=F",
-}
-
-def infer_ticker_from_stem(stem: str) -> Optional[str]:
-    if stem in SPECIAL_TICKER_MAP:
-        return SPECIAL_TICKER_MAP[stem]
-
-    if _fx_pair_re.match(stem):
-        base, quote = stem.split("_")
-        return f"{base}{quote}=X"
-
-    m = _jp_stock_re.match(stem)
-    if m:
-        return f"{m.group('code')}.T"
-
-    return None
-
-
-# =========================
-# StockFxList.txt パース
-# =========================
-
-def parse_stockfxlist(stockfxlist_path: Path) -> list[tuple[str, str, Optional[int]]]:
-    """
-    戻り値: [(datafile_rel, stock_type, decimals_or_none), ...]
-    例: ("FXCFDNightly/EUR_USD.csv", "FX", 5)
-    """
-    rows: list[tuple[str, str, Optional[int]]] = []
-    text = stockfxlist_path.read_text(encoding="utf-8", errors="ignore")
-
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("//"):
-            continue
-
-        parts = line.split()
-        if len(parts) < 3:
-            continue
-
-        datafile_rel = parts[0]
-        stock_type = parts[1]
-
-        decimals: Optional[int] = None
-        # "FX Investing 5 ..." のような行に対応
-        if len(parts) >= 4 and parts[3].isdigit():
-            decimals = int(parts[3])
-
-        rows.append((datafile_rel, stock_type, decimals))
-
-    return rows
-
-
-def default_decimals_from_list(stock_type: str, stem: str) -> int:
-    """
-    桁数指定が無いときのデフォルト（Stock/StockAverage はここでは使わない）
-    """
-    if stock_type == "FX":
-        if "_JPY" in stem or stem.startswith("JPY_"):
-            return 3
-        return 5
-    return 2  # Commodity / Index など
-
 
 def resolve_local_csv_path(base_dir: Path, datafile_rel: str) -> Path:
     return base_dir / Path(datafile_rel)
 
+def build_configs_from_json(base_dir: Path, json_path: Path) -> list[SeriesConfig]:
+    """
+    StockFxList.json を読み込み、SeriesConfigのリストを生成する
+    """
+    if not json_path.exists():
+        raise FileNotFoundError(f"JSONファイルが見つかりません: {json_path}")
 
-def build_configs_from_stockfxlist(base_dir: Path, stockfxlist_path: Path) -> list[SeriesConfig]:
-    entries = parse_stockfxlist(stockfxlist_path)
+    # JSONロード
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    series_list = data.get("series", [])
     configs: list[SeriesConfig] = []
 
-    for datafile_rel, stock_type, decimals_opt in entries:
-        csv_path = resolve_local_csv_path(base_dir, datafile_rel)
-        stem = csv_path.stem
-
-        ticker = infer_ticker_from_stem(stem)
-        if ticker is None:
-            print(f"[SKIP] ticker推測不可: {stem} ({datafile_rel})")
+    for entry in series_list:
+        # 必須項目の取得
+        path_str = entry.get("path")
+        s_type = entry.get("type")
+        ticker = entry.get("ticker")
+        
+        if not (path_str and s_type and ticker):
+            print(f"[SKIP] 必須項目不足: {entry}")
             continue
 
-        # ここが今回の肝：
-        # - リストに桁数指定があるものは固定（0埋め）
-        # - 日経平均(StockAverage) は 3桁固定 0埋め
-        # - 個別株(Stock) は “整数→整数 / 小数→最大1桁で四捨五入” の可変
-        # - それ以外で桁数指定なしは従来デフォルト
-        if decimals_opt is not None:
-            decimals: Optional[int] = int(decimals_opt)
-        elif stock_type == "StockAverage":
-            decimals = None
-        elif stock_type == "Stock":
-            decimals = None
-        else:
-            decimals = int(default_decimals_from_list(stock_type, stem))
+        csv_path = resolve_local_csv_path(base_dir, path_str)
+        stem = csv_path.stem
 
+        # フォーマット情報の取得
+        fmt = entry.get("format", {})
+        # JSONに "decimals" が明記されていれば整数として取得、なければ None
+        decimals = fmt.get("decimals") 
+        
+        # SeriesConfig 作成
+        # JSONにある ticker を直接使用するため推測ロジックは不要
         configs.append(SeriesConfig(
             name=stem,
             csv_path=csv_path,
             ticker=ticker,
-            stock_type=stock_type,
+            stock_type=s_type,
             decimals=decimals,
         ))
 
@@ -247,6 +180,14 @@ def columns_for_stock_type(stock_type: str) -> list[str]:
 
 
 def load_price_csv(csv_path: Path, stock_type: str, date_format: str = "%Y/%m/%d") -> pd.DataFrame:
+    if not csv_path.exists():
+        # ファイルが無い場合は空のDataFrameを返す（初回作成用）
+        cols = columns_for_stock_type(stock_type)
+        df = pd.DataFrame(columns=cols)
+        # 日付パース用のダミー列だけ仕込んでおく
+        df["_date_dt"] = pd.to_datetime([], errors="coerce")
+        return df
+
     df = pd.read_csv(csv_path)
 
     need_cols = columns_for_stock_type(stock_type)
@@ -257,7 +198,9 @@ def load_price_csv(csv_path: Path, stock_type: str, date_format: str = "%Y/%m/%d
 
     df = df.copy()
     df["_date_dt"] = pd.to_datetime(df["日付"], format=date_format, errors="coerce")
-    if df["_date_dt"].isna().all():
+    
+    # 全ての日付が無効、またはデータがない場合のケア
+    if not df.empty and df["_date_dt"].isna().all():
         raise ValueError(f"CSVの '日付' がパースできません: {csv_path}")
 
     return df
@@ -435,7 +378,19 @@ def fill_csv_until_yesterday(
     up_to = today - timedelta(days=1)
 
     df = load_price_csv(config.csv_path, stock_type=config.stock_type, date_format=date_format)
-    latest = df["_date_dt"].max().date()
+    
+    # 新規作成時はデータがないので、適当な古い日付を「最新」とみなして全期間取得させるか、
+    # あるいは開始日を指定する必要がありますが、ここでは「データなし＝昨日まで全部取る」動きになります
+    if df.empty or "_date_dt" not in df.columns or df["_date_dt"].dropna().empty:
+         # データがない場合、とりあえず1年前から取得などのロジックが必要かもしれませんが
+         # 既存ロジックに合わせて「最新日付が取得できなければスキップ」せずに
+         # ひとまず適当な過去(例: 2000年)をセットするか、
+         # あるいは「データ無し」を許容する修正を入れる必要があります。
+         # 今回は「既存ファイルがある前提」のロジックを踏襲しつつ、
+         # エラーにならないよう直近の日付を返します。
+         latest = date(2000, 1, 1) # 仮
+    else:
+        latest = df["_date_dt"].max().date()
 
     if latest >= up_to:
         if not quiet:
@@ -482,12 +437,19 @@ def fill_many(configs: Iterable[SeriesConfig], quiet: bool = False) -> None:
 
 
 def main():
-    # StockFxList.txt に書いてある相対パスの「親フォルダ」を指定
-    base_dir = Path(r".")  # 例: Path(r"D:\Okinaga\YourRoot")
-    stockfxlist_path = base_dir / "StockFxList.txt"
+    # 実行場所（相対パス基準）
+    base_dir = Path(r".")
+    
+    # 変更点: .txt ではなく .json を読み込む
+    stockfxlist_path = base_dir / "StockFxList.json"
 
-    configs = build_configs_from_stockfxlist(base_dir, stockfxlist_path)
-    print(f"更新対象（StockFxList.txt 限定）: {len(configs)} 件")
+    try:
+        configs = build_configs_from_json(base_dir, stockfxlist_path)
+    except Exception as e:
+        print(f"設定読み込みエラー: {e}")
+        return
+
+    print(f"更新対象（StockFxList.json）: {len(configs)} 件")
     fill_many(configs)
 
 if __name__ == "__main__":

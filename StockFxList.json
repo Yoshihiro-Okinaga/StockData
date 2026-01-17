@@ -1,0 +1,554 @@
+{
+  "series": [
+    {
+      "path": "StockNightly/1963_日揮ホールディングス.csv",
+      "type": "Stock",
+      "ticker": "1963.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/3407_旭化成.csv",
+      "type": "Stock",
+      "ticker": "3407.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/5401_日本製鉄.csv",
+      "type": "Stock",
+      "ticker": "5401.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/6752_パナソニック.csv",
+      "type": "Stock",
+      "ticker": "6752.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/6770_アルプスアルパイン.csv",
+      "type": "Stock",
+      "ticker": "6770.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/8802_三菱地所.csv",
+      "type": "Stock",
+      "ticker": "8802.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/日経平均.csv",
+      "type": "StockAverage",
+      "ticker": "^N225",
+      "format": {
+        "mode": "round_3_and_pad"
+      }
+    },
+    {
+      "path": "StockNightly/Verification/9501_東京電力ホールディングス.csv",
+      "type": "Stock",
+      "ticker": "9501.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Verification/9502_中部電力.csv",
+      "type": "Stock",
+      "ticker": "9502.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Verification/9503_関西電力.csv",
+      "type": "Stock",
+      "ticker": "9503.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Verification/9504_中国電力.csv",
+      "type": "Stock",
+      "ticker": "9504.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Verification/9505_北陸電力.csv",
+      "type": "Stock",
+      "ticker": "9505.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Verification/9506_東北電力.csv",
+      "type": "Stock",
+      "ticker": "9506.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Verification/9507_四国電力.csv",
+      "type": "Stock",
+      "ticker": "9507.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Verification/9508_九州電力.csv",
+      "type": "Stock",
+      "ticker": "9508.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Verification/9509_北海道電力.csv",
+      "type": "Stock",
+      "ticker": "9509.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Verification/9511_沖縄電力.csv",
+      "type": "Stock",
+      "ticker": "9511.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Sub/1808_長谷工コーポレーション.csv",
+      "type": "Stock",
+      "ticker": "1808.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Sub/7201_日産自動車.csv",
+      "type": "Stock",
+      "ticker": "7201.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Sub/7261_マツダ.csv",
+      "type": "Stock",
+      "ticker": "7261.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Sub/8001_伊藤忠商事.csv",
+      "type": "Stock",
+      "ticker": "8001.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Sub/8628_松井証券.csv",
+      "type": "Stock",
+      "ticker": "8628.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Sub/9449_ＧＭＯインターネット.csv",
+      "type": "Stock",
+      "ticker": "9449.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "StockNightly/Sub/9697_カプコン.csv",
+      "type": "Stock",
+      "ticker": "9697.T",
+      "format": {
+        "mode": "stock_0_or_1dp"
+      },
+      "extras": {
+        "volume": true,
+        "stock_splits": true,
+        "splits_no_trailing_comma": true
+      }
+    },
+    {
+      "path": "FXCFDNightly/USD_JPY.csv",
+      "type": "FX",
+      "ticker": "USDJPY=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 3
+      }
+    },
+    {
+      "path": "FXCFDNightly/EUR_USD.csv",
+      "type": "FX",
+      "ticker": "EURUSD=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 5
+      }
+    },
+    {
+      "path": "FXCFDNightly/EUR_GBP.csv",
+      "type": "FX",
+      "ticker": "EURGBP=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 5
+      }
+    },
+    {
+      "path": "FXCFDNightly/GBP_USD.csv",
+      "type": "FX",
+      "ticker": "GBPUSD=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 5
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/AUD_JPY.csv",
+      "type": "FX",
+      "ticker": "AUDJPY=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 3
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/AUD_USD.csv",
+      "type": "FX",
+      "ticker": "AUDUSD=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 5
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/CAD_JPY.csv",
+      "type": "FX",
+      "ticker": "CADJPY=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 3
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/CHF_JPY.csv",
+      "type": "FX",
+      "ticker": "CHFJPY=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 3
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/EUR_AUD.csv",
+      "type": "FX",
+      "ticker": "EURAUD=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 5
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/EUR_CHF.csv",
+      "type": "FX",
+      "ticker": "EURCHF=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 5
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/EUR_JPY.csv",
+      "type": "FX",
+      "ticker": "EURJPY=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 3
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/EUR_NZD.csv",
+      "type": "FX",
+      "ticker": "EURNZD=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 5
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/GBP_AUD.csv",
+      "type": "FX",
+      "ticker": "GBPAUD=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 5
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/GBP_CHF.csv",
+      "type": "FX",
+      "ticker": "GBPCHF=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 5
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/GBP_JPY.csv",
+      "type": "FX",
+      "ticker": "GBPJPY=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 3
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/NZD_JPY.csv",
+      "type": "FX",
+      "ticker": "NZDJPY=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 3
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/NZD_USD.csv",
+      "type": "FX",
+      "ticker": "NZDUSD=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 5
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/TRY_JPY.csv",
+      "type": "FX",
+      "ticker": "TRYJPY=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 3
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/USD_CAD.csv",
+      "type": "FX",
+      "ticker": "USDCAD=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 5
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/USD_CHF.csv",
+      "type": "FX",
+      "ticker": "USDCHF=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 5
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/ZAR_JPY.csv",
+      "type": "FX",
+      "ticker": "ZARJPY=X",
+      "format": {
+        "mode": "fixed",
+        "decimals": 3
+      }
+    },
+    {
+      "path": "FXCFDNightly/GOLD_USD.csv",
+      "type": "Commodity",
+      "ticker": "GC=F",
+      "format": {
+        "mode": "fixed",
+        "decimals": 1
+      }
+    },
+    {
+      "path": "FXCFDNightly/JAPAN255_Futures.csv",
+      "type": "Index",
+      "ticker": "NIY=F",
+      "format": {
+        "mode": "fixed",
+        "decimals": 1
+      }
+    },
+    {
+      "path": "FXCFDNightly/OIL_USD.csv",
+      "type": "Commodity",
+      "ticker": "CL=F",
+      "format": {
+        "mode": "fixed",
+        "decimals": 2
+      }
+    },
+    {
+      "path": "FXCFDNightly/US30_Futures.csv",
+      "type": "Index",
+      "ticker": "YM=F",
+      "format": {
+        "mode": "fixed",
+        "decimals": 1
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/SILVER_USD.csv",
+      "type": "Commodity",
+      "ticker": "SI=F",
+      "format": {
+        "mode": "fixed",
+        "decimals": 2
+      }
+    },
+    {
+      "path": "FXCFDNightly/Sub/PLATINUM_USD.csv",
+      "type": "Commodity",
+      "ticker": "PL=F",
+      "format": {
+        "mode": "fixed",
+        "decimals": 2
+      }
+    }
+  ]
+}
