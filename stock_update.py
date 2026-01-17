@@ -214,6 +214,30 @@ def _fmt_int(x) -> str:
         return str(x)
 
 
+def _fmt_split(x) -> str:
+    """株式分割用：0/NaNは空欄。それ以外は可変で表示。"""
+    if pd.isna(x):
+        return ""
+    try:
+        v = float(x)
+        if v == 0.0:
+            return ""
+    except Exception:
+        # 文字列で入っている場合も考慮
+        s = str(x).strip()
+        if s in ("", "0", "0.0", "0.00", "0.000"):
+            return ""
+        return s
+    return _fmt_variable_number(x)
+
+
+def _fmt_fixed(x, decimals: int) -> str:
+    """固定桁（0埋め）用。NaNは空欄。"""
+    if pd.isna(x):
+        return ""
+    return f"{float(x):.{decimals}f}"
+
+
 def save_price_csv(df: pd.DataFrame, csv_path: Path, decimals: Optional[int], stock_type: str) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -222,13 +246,35 @@ def save_price_csv(df: pd.DataFrame, csv_path: Path, decimals: Optional[int], st
 
     # Stockだけ出来高/株式分割の整形を追加
     if stock_type == "Stock":
-        out["出来高"] = out["出来高"].apply(_fmt_int)
-        out["株式分割"] = out["株式分割"].apply(_fmt_split)
+        # 価格列の整形（可変 or 固定）
+        for col in PRICE_COLUMNS:
+            if decimals is None:
+                out[col] = out[col].apply(_fmt_variable_number)  # 1438.0 -> 1438
+            else:
+                out[col] = out[col].apply(lambda v: _fmt_fixed(v, decimals))  # 0埋め固定
 
-        # ★株式分割がファイル内で一度も無いなら、列ごと落とす（= 行末カンマも消える）
-        has_split = out["株式分割"].astype(str).str.strip().ne("").any()
-        if not has_split:
-            out = out.drop(columns=["株式分割"])
+        # 出来高・株式分割の整形
+        out["出来高"] = out["出来高"].apply(_fmt_int)
+        out["株式分割"] = out["株式分割"].apply(_fmt_split)  # 0/NaN -> ""
+
+        # ヘッダは必ず 8列（株式分割の文字は必ず入る）
+        header = ",".join(out_cols)
+
+        lines = [header]
+        for _, r in out.iterrows():
+            split_val = str(r["株式分割"]).strip()
+
+            if split_val == "":
+                # ★株式分割が無い → 最後の列を出さず、末尾カンマを消す
+                fields = [str(r[c]) for c in out_cols[:-1]]
+            else:
+                # ★株式分割がある → 8列全部出す
+                fields = [str(r[c]) for c in out_cols]
+
+            lines.append(",".join(fields))
+
+        csv_path.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
+        return
 
     if decimals is None:
         # 可変：価格列だけ文字列化（.0を消す）
