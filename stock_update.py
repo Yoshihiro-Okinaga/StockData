@@ -223,7 +223,12 @@ def save_price_csv(df: pd.DataFrame, csv_path: Path, decimals: Optional[int], st
     # Stockだけ出来高/株式分割の整形を追加
     if stock_type == "Stock":
         out["出来高"] = out["出来高"].apply(_fmt_int)
-        out["株式分割"] = out["株式分割"].apply(_fmt_variable_number)
+        out["株式分割"] = out["株式分割"].apply(_fmt_split)
+
+        # ★株式分割がファイル内で一度も無いなら、列ごと落とす（= 行末カンマも消える）
+        has_split = out["株式分割"].astype(str).str.strip().ne("").any()
+        if not has_split:
+            out = out.drop(columns=["株式分割"])
 
     if decimals is None:
         # 可変：価格列だけ文字列化（.0を消す）
@@ -310,7 +315,12 @@ def history_to_calendar_rows(
                     row["安値"] = round(float(l), decimals)
 
                 row["出来高"] = float(v) if v is not None else float("nan")
-                row["株式分割"] = float(s) if s is not None else float("nan")
+                try:
+                    s_val = float(s) if s is not None else float("nan")
+                except Exception:
+                    s_val = float("nan")
+
+                row["株式分割"] = float("nan") if (pd.isna(s_val) or s_val == 0.0) else s_val
             else:
                 o, c, h, l = hist_map[d]
                 if decimals is None:
