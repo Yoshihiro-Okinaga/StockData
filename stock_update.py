@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional, Iterable
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import pandas as pd
 import yfinance as yf
@@ -20,17 +20,15 @@ import yfinance as yf
 BASE_COLUMNS = ["日付", "曜日", "始値", "終値", "高値", "安値"]
 PRICE_COLUMNS = ["始値", "終値", "高値", "安値"]
 
-# Stockだけ追加したい列
-STOCK_EXTRA_COLUMNS = ["出来高", "株式分割"]  # Volume, Stock Splits
-
+STOCK_EXTRA_COLUMNS = ["出来高", "株式分割"]  # Stockのみ
 
 @dataclass(frozen=True)
 class SeriesConfig:
     name: str
     csv_path: Path
     ticker: str
-    stock_type: str                 # "Stock" / "StockAverage" / "FX" / "Commodity" / "Index" ...
-    decimals: Optional[int]         # None = 可変(1438.0→1438)、数字 = 固定桁(%.5fなど)
+    stock_type: str                 # Stock / StockAverage / FX / Commodity / Index ...
+    decimals: Optional[int]         # 指定あり→固定0埋め、None→タイプ別の可変ルール
     interval: str = "1d"
     tz: str = "Asia/Tokyo"
 
@@ -85,16 +83,14 @@ def parse_stockfxlist(stockfxlist_path: Path) -> list[tuple[str, str, Optional[i
             continue
 
         parts = line.split()
-        # 最低でも: データファイル, 株タイプ, Webタイプ がある想定
         if len(parts) < 3:
             continue
 
         datafile_rel = parts[0]
-        stock_type   = parts[1]
+        stock_type = parts[1]
 
-        # parts[2] が Webタイプ（Yahoo/Investing）
-        # parts[3] が数字なら桁数
         decimals: Optional[int] = None
+        # "FX Investing 5 ..." のような行に対応
         if len(parts) >= 4 and parts[3].isdigit():
             decimals = int(parts[3])
 
@@ -105,24 +101,16 @@ def parse_stockfxlist(stockfxlist_path: Path) -> list[tuple[str, str, Optional[i
 
 def default_decimals_from_list(stock_type: str, stem: str) -> int:
     """
-    桁数指定が無いときのデフォルト
-    - FX: JPY絡みは3、それ以外は5
-    - Commodity/Index: 2
+    桁数指定が無いときのデフォルト（Stock/StockAverage はここでは使わない）
     """
     if stock_type == "FX":
         if "_JPY" in stem or stem.startswith("JPY_"):
             return 3
         return 5
-
-    # Commodity / Index など
-    return 2
+    return 2  # Commodity / Index など
 
 
 def resolve_local_csv_path(base_dir: Path, datafile_rel: str) -> Path:
-    """
-    StockFxList.txt の相対パスを base_dir から解決する。
-    例: base_dir/StockNightly/1963_...csv
-    """
     return base_dir / Path(datafile_rel)
 
 
@@ -139,13 +127,16 @@ def build_configs_from_stockfxlist(base_dir: Path, stockfxlist_path: Path) -> li
             print(f"[SKIP] ticker推測不可: {stem} ({datafile_rel})")
             continue
 
-        # 小数点の扱い:
-        # - リストに桁数指定があれば固定
-        # - Stock/StockAverage で桁数指定が無ければ「値ごと可変」
-        # - それ以外は従来通りデフォルト桁数
+        # ここが今回の肝：
+        # - リストに桁数指定があるものは固定（0埋め）
+        # - 日経平均(StockAverage) は 3桁固定 0埋め
+        # - 個別株(Stock) は “整数→整数 / 小数→最大1桁で四捨五入” の可変
+        # - それ以外で桁数指定なしは従来デフォルト
         if decimals_opt is not None:
             decimals: Optional[int] = int(decimals_opt)
-        elif stock_type in ("Stock", "StockAverage"):
+        elif stock_type == "StockAverage":
+            decimals = 3
+        elif stock_type == "Stock":
             decimals = None
         else:
             decimals = int(default_decimals_from_list(stock_type, stem))
@@ -162,35 +153,11 @@ def build_configs_from_stockfxlist(base_dir: Path, stockfxlist_path: Path) -> li
 
 
 # =========================
-# CSV 読み書き
+# フォーマット
 # =========================
 
-def columns_for_stock_type(stock_type: str) -> list[str]:
-    if stock_type == "Stock":
-        return BASE_COLUMNS + STOCK_EXTRA_COLUMNS
-    return BASE_COLUMNS
-
-
-def load_price_csv(csv_path: Path, stock_type: str, date_format: str = "%Y/%m/%d") -> pd.DataFrame:
-    df = pd.read_csv(csv_path)
-
-    need_cols = columns_for_stock_type(stock_type)
-    # 足りない列は作って互換性を保つ（昔のStock CSVに出来高/株式分割が無くても動く）
-    for c in need_cols:
-        if c not in df.columns:
-            df[c] = float("nan")
-
-    # 余計な列は残してもいいが、処理は必要列だけ使う
-    df = df.copy()
-    df["_date_dt"] = pd.to_datetime(df["日付"], format=date_format, errors="coerce")
-    if df["_date_dt"].isna().all():
-        raise ValueError(f"CSVの '日付' がパースできません: {csv_path}")
-
-    return df
-
-
 def _fmt_variable_number(x) -> str:
-    """1438.0 -> '1438', 1438.5 -> '1438.5', 1438.500 -> '1438.5'"""
+    """末尾0を落とす（一般用途）"""
     if pd.isna(x):
         return ""
     s = str(x)
@@ -198,14 +165,40 @@ def _fmt_variable_number(x) -> str:
         d = Decimal(s)
     except InvalidOperation:
         return s
-    s2 = format(d, "f")  # exponent を避ける
+    s2 = format(d, "f")
+    if "." in s2:
+        s2 = s2.rstrip("0").rstrip(".")
+    return s2
+
+
+def _fmt_stock_price_0_or_1dp(x) -> str:
+    """
+    Stock用：
+    - 整数なら整数
+    - 小数なら最大1桁、四捨五入
+    """
+    if pd.isna(x):
+        return ""
+    s = str(x)
+    try:
+        d = Decimal(s)
+    except InvalidOperation:
+        return s
+
+    # 整数判定
+    if d == d.to_integral_value():
+        return str(int(d))
+
+    # 1桁で四捨五入
+    q = d.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    s2 = format(q, "f")
     if "." in s2:
         s2 = s2.rstrip("0").rstrip(".")
     return s2
 
 
 def _fmt_int(x) -> str:
-    """出来高用。NaNは空欄。floatでも整数なら整数化して出す。"""
+    """出来高用。NaNは空欄。"""
     if pd.isna(x):
         return ""
     try:
@@ -215,7 +208,7 @@ def _fmt_int(x) -> str:
 
 
 def _fmt_split(x) -> str:
-    """株式分割用：0/NaNは空欄。それ以外は可変で表示。"""
+    """株式分割用：0/NaNは空欄、それ以外は自然表示"""
     if pd.isna(x):
         return ""
     try:
@@ -223,7 +216,6 @@ def _fmt_split(x) -> str:
         if v == 0.0:
             return ""
     except Exception:
-        # 文字列で入っている場合も考慮
         s = str(x).strip()
         if s in ("", "0", "0.0", "0.00", "0.000"):
             return ""
@@ -238,13 +230,40 @@ def _fmt_fixed(x, decimals: int) -> str:
     return f"{float(x):.{decimals}f}"
 
 
+# =========================
+# CSV 読み書き
+# =========================
+
+def columns_for_stock_type(stock_type: str) -> list[str]:
+    if stock_type == "Stock":
+        return BASE_COLUMNS + STOCK_EXTRA_COLUMNS
+    return BASE_COLUMNS
+
+
+def load_price_csv(csv_path: Path, stock_type: str, date_format: str = "%Y/%m/%d") -> pd.DataFrame:
+    df = pd.read_csv(csv_path)
+
+    need_cols = columns_for_stock_type(stock_type)
+    # 足りない列は追加（互換性）
+    for c in need_cols:
+        if c not in df.columns:
+            df[c] = float("nan")
+
+    df = df.copy()
+    df["_date_dt"] = pd.to_datetime(df["日付"], format=date_format, errors="coerce")
+    if df["_date_dt"].isna().all():
+        raise ValueError(f"CSVの '日付' がパースできません: {csv_path}")
+
+    return df
+
+
 def save_price_csv(df: pd.DataFrame, csv_path: Path, decimals: Optional[int], stock_type: str) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     out_cols = columns_for_stock_type(stock_type)
     out = df[out_cols].copy()
 
-    # Stockだけ出来高/株式分割の整形を追加
+    # Stock追加列の整形
     if stock_type == "Stock":
         # 価格列の整形（可変 or 固定）
         for col in PRICE_COLUMNS:
@@ -276,13 +295,19 @@ def save_price_csv(df: pd.DataFrame, csv_path: Path, decimals: Optional[int], st
         csv_path.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
         return
 
+    # 価格整形
     if decimals is None:
-        # 可変：価格列だけ文字列化（.0を消す）
-        for col in PRICE_COLUMNS:
-            out[col] = out[col].apply(_fmt_variable_number)
+        # Stock: 0 or 1dp ルール
+        if stock_type == "Stock":
+            for col in PRICE_COLUMNS:
+                out[col] = out[col].apply(_fmt_stock_price_0_or_1dp)
+        else:
+            for col in PRICE_COLUMNS:
+                out[col] = out[col].apply(_fmt_variable_number)
+
         out.to_csv(csv_path, index=False, encoding="utf-8-sig")
     else:
-        # 固定：価格列はfloat_formatで0埋め
+        # 固定桁（0埋め）
         out.to_csv(csv_path, index=False, encoding="utf-8-sig", float_format=f"%.{decimals}f")
 
 
@@ -315,12 +340,10 @@ def history_to_calendar_rows(
     cal = pd.date_range(pd.Timestamp(start), pd.Timestamp(up_to), freq="D")
     cal_dates = [d.date() for d in cal.to_pydatetime()]
 
-    # 取得した日だけ辞書化
     hist_map = {}
     if not hist.empty:
         hist_dates = _index_to_dates(hist.index, tz=tz)
         for d, (_, r) in zip(hist_dates, hist.iterrows()):
-            # Stockの場合のみ Volume / Stock Splits も保持
             if stock_type == "Stock":
                 hist_map[d] = (
                     r.get("Open"), r.get("Close"), r.get("High"), r.get("Low"),
@@ -332,7 +355,6 @@ def history_to_calendar_rows(
     rows = []
     for d in cal_dates:
         ts = pd.Timestamp(d)
-
         row = {
             "日付": ts.strftime(date_format),
             "曜日": ts.strftime("%a"),
@@ -341,7 +363,6 @@ def history_to_calendar_rows(
             "高値": float("nan"),
             "安値": float("nan"),
         }
-
         if stock_type == "Stock":
             row["出来高"] = float("nan")
             row["株式分割"] = float("nan")
@@ -349,26 +370,20 @@ def history_to_calendar_rows(
         if d in hist_map:
             if stock_type == "Stock":
                 o, c, h, l, v, s = hist_map[d]
-                if decimals is None:
-                    row["始値"] = float(o)
-                    row["終値"] = float(c)
-                    row["高値"] = float(h)
-                    row["安値"] = float(l)
-                else:
-                    row["始値"] = round(float(o), decimals)
-                    row["終値"] = round(float(c), decimals)
-                    row["高値"] = round(float(h), decimals)
-                    row["安値"] = round(float(l), decimals)
-
+                row["始値"] = float(o)
+                row["終値"] = float(c)
+                row["高値"] = float(h)
+                row["安値"] = float(l)
                 row["出来高"] = float(v) if v is not None else float("nan")
+                # 分割は0なら空欄にする（保存側でも空欄化）
                 try:
-                    s_val = float(s) if s is not None else float("nan")
+                    sv = float(s) if s is not None else float("nan")
                 except Exception:
-                    s_val = float("nan")
-
-                row["株式分割"] = float("nan") if (pd.isna(s_val) or s_val == 0.0) else s_val
+                    sv = float("nan")
+                row["株式分割"] = float("nan") if (pd.isna(sv) or sv == 0.0) else sv
             else:
                 o, c, h, l = hist_map[d]
+                # 固定桁のもの（例: 日経平均3桁）はここで丸めておく
                 if decimals is None:
                     row["始値"] = float(o)
                     row["終値"] = float(c)
@@ -392,7 +407,6 @@ def merge_new_rows(existing_df: pd.DataFrame, new_rows: pd.DataFrame, date_forma
     base = base[out_cols].copy()
 
     existing_dates = set(base["日付"].astype(str).tolist())
-
     add = new_rows[~new_rows["日付"].isin(existing_dates)].copy()
     added = len(add)
 
@@ -402,10 +416,6 @@ def merge_new_rows(existing_df: pd.DataFrame, new_rows: pd.DataFrame, date_forma
     out = out[out_cols]
     return out, added
 
-
-# =========================
-# 1本埋める
-# =========================
 
 def fill_csv_until_yesterday(
     config: SeriesConfig,
@@ -434,12 +444,11 @@ def fill_csv_until_yesterday(
     if throttle_sec > 0:
         time.sleep(throttle_sec)
 
-    dec_str = "variable" if config.decimals is None else str(config.decimals)
     if not quiet:
-        print(f"[{config.name}] {config.ticker} {start}〜{up_to} / decimals={dec_str} / type={config.stock_type}")
+        dec_str = "variable" if config.decimals is None else str(config.decimals)
+        print(f"[{config.name}] {config.ticker} {start}〜{up_to} / type={config.stock_type} / decimals={dec_str}")
 
     hist = yfinance_history(config.ticker, start=start, end_exclusive=end_exclusive, interval=config.interval)
-
     new_rows = history_to_calendar_rows(
         hist=hist,
         start=start,
@@ -467,8 +476,8 @@ def fill_many(configs: Iterable[SeriesConfig], quiet: bool = False) -> None:
 
 
 def main():
-    # StockFxList.txt に書いてある相対パスの「親フォルダ」
-    base_dir = Path(r".")  # ←あなたの環境に合わせて変更
+    # StockFxList.txt に書いてある相対パスの「親フォルダ」を指定
+    base_dir = Path(r".")  # 例: Path(r"D:\Okinaga\YourRoot")
     stockfxlist_path = base_dir / "StockFxList.txt"
 
     configs = build_configs_from_stockfxlist(base_dir, stockfxlist_path)
