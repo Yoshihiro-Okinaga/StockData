@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import time
+import os
+import requests
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -14,13 +16,17 @@ import yfinance as yf
 
 
 # =========================
-# 設定
+# 設定 & 定数
 # =========================
 
 BASE_COLUMNS = ["日付", "曜日", "始値", "終値", "高値", "安値"]
 PRICE_COLUMNS = ["始値", "終値", "高値", "安値"]
-
 STOCK_EXTRA_COLUMNS = ["出来高", "株式分割"]  # Stockのみ
+
+# 12 Data API設定
+TWELVEDATA_BASE_URL = "https://api.twelvedata.com/time_series"
+# GitHub ActionsのSecrets、またはローカルの環境変数から読み込む
+TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY")
 
 @dataclass(frozen=True)
 class SeriesConfig:
@@ -69,11 +75,8 @@ def build_configs_from_json(base_dir: Path, json_path: Path) -> list[SeriesConfi
 
         # フォーマット情報の取得
         fmt = entry.get("format", {})
-        # JSONに "decimals" が明記されていれば整数として取得、なければ None
         decimals = fmt.get("decimals") 
         
-        # SeriesConfig 作成
-        # JSONにある ticker を直接使用するため推測ロジックは不要
         configs.append(SeriesConfig(
             name=stem,
             csv_path=csv_path,
@@ -86,7 +89,7 @@ def build_configs_from_json(base_dir: Path, json_path: Path) -> list[SeriesConfi
 
 
 # =========================
-# フォーマット
+# フォーマット関数
 # =========================
 
 def _fmt_variable_number(x) -> str:
@@ -181,10 +184,9 @@ def columns_for_stock_type(stock_type: str) -> list[str]:
 
 def load_price_csv(csv_path: Path, stock_type: str, date_format: str = "%Y/%m/%d") -> pd.DataFrame:
     if not csv_path.exists():
-        # ファイルが無い場合は空のDataFrameを返す（初回作成用）
+        # 新規作成用
         cols = columns_for_stock_type(stock_type)
         df = pd.DataFrame(columns=cols)
-        # 日付パース用のダミー列だけ仕込んでおく
         df["_date_dt"] = pd.to_datetime([], errors="coerce")
         return df
 
@@ -199,10 +201,6 @@ def load_price_csv(csv_path: Path, stock_type: str, date_format: str = "%Y/%m/%d
     df = df.copy()
     df["_date_dt"] = pd.to_datetime(df["日付"], format=date_format, errors="coerce")
     
-    # 全ての日付が無効、またはデータがない場合のケア
-    if not df.empty and df["_date_dt"].isna().all():
-        raise ValueError(f"CSVの '日付' がパースできません: {csv_path}")
-
     return df
 
 
@@ -219,41 +217,37 @@ def save_price_csv(df: pd.DataFrame, csv_path: Path, decimals: Optional[int], st
             if decimals is None:
                 out[col] = out[col].apply(_fmt_stock_price_0_or_1dp)
             else:
-                out[col] = out[col].apply(lambda v: _fmt_fixed(v, decimals))  # 0埋め固定
+                out[col] = out[col].apply(lambda v: _fmt_fixed(v, decimals))
 
         # 出来高・株式分割の整形
         out["出来高"] = out["出来高"].apply(_fmt_int)
-        out["株式分割"] = out["株式分割"].apply(_fmt_split)  # 0/NaN -> ""
+        out["株式分割"] = out["株式分割"].apply(_fmt_split)
 
-        # ヘッダは必ず 8列（株式分割の文字は必ず入る）
+        # ヘッダ作成
         header = ",".join(out_cols)
-
         lines = [header]
+        
         for _, r in out.iterrows():
             split_val = str(r["株式分割"]).strip()
-
             if split_val == "":
-                # ★株式分割が無い → 最後の列を出さず、末尾カンマを消す
+                # 株式分割が無い → 最後の列を出さず、末尾カンマを消す
                 fields = [str(r[c]) for c in out_cols[:-1]]
             else:
-                # ★株式分割がある → 8列全部出す
+                # 株式分割がある → 全列出す
                 fields = [str(r[c]) for c in out_cols]
-
             lines.append(",".join(fields))
 
         csv_path.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
         return
 
-    # 価格整形
+    # その他タイプの整形
     if decimals is None:
-        # Stock: 0 or 1dp ルール
         if stock_type == "StockAverage":
             for col in PRICE_COLUMNS:
                 out[col] = out[col].apply(_fmt_round_3_and_pad)
         else:
             for col in PRICE_COLUMNS:
                 out[col] = out[col].apply(_fmt_variable_number)
-
         out.to_csv(csv_path, index=False, encoding="utf-8-sig")
     else:
         # 固定桁（0埋め）
@@ -261,14 +255,130 @@ def save_price_csv(df: pd.DataFrame, csv_path: Path, decimals: Optional[int], st
 
 
 # =========================
-# yfinance → 行生成（土日も行を作る）
+# データ取得ロジック (Yahoo / 12 Data)
 # =========================
 
-def yfinance_history(ticker: str, start: date, end_exclusive: date, interval: str = "1d") -> pd.DataFrame:
+def _map_ticker_to_12data(yahoo_ticker: str) -> str:
+    """
+    Yahoo形式のティッカーを12 Data形式に変換するヘルパー
+    例: USDJPY=X -> USD/JPY
+        GC=F -> XAU/USD (Gold)
+    """
+    # 明示的なマッピング（商品先物・CFD系）
+    mapping = {
+        "GC=F": "XAU/USD",  # Gold
+        "SI=F": "XAG/USD",  # Silver
+        "CL=F": "WTI/USD",  # Crude Oil
+        "PL=F": "XPT/USD",  # Platinum
+        "NIY=F": "JPN225",  # Nikkei Futures (CFD) ※プロバイダにより異なる可能性あり
+        "YM=F": "DJI",      # Dow Futures (CFD)
+    }
+    if yahoo_ticker in mapping:
+        return mapping[yahoo_ticker]
+
+    # 余計なサフィックスを削除
+    symbol = yahoo_ticker.replace("=X", "").replace("=F", "")
+
+    # 通貨ペア (例: USDJPY -> USD/JPY)
+    # 6文字かつ全てアルファベットの場合のみ分割を試みる
+    if len(symbol) == 6 and symbol.isalpha():
+        return f"{symbol[:3]}/{symbol[3:]}"
+
+    return symbol
+
+
+def fetch_yfinance(ticker: str, start: date, end_exclusive: date) -> pd.DataFrame:
+    """Yahoo Financeから取得"""
     t = yf.Ticker(ticker)
-    hist = t.history(start=start, end=end_exclusive, interval=interval, auto_adjust=False)
+    hist = t.history(start=start, end=end_exclusive, interval="1d", auto_adjust=False)
     return pd.DataFrame() if hist is None else hist
 
+
+def fetch_12data(ticker: str, start: date, end_exclusive: date) -> pd.DataFrame:
+    """12 Data APIから取得"""
+    if not TWELVEDATA_API_KEY:
+        print(f"[Warning] TWELVEDATA_API_KEY 未設定のため {ticker} をスキップします。")
+        return pd.DataFrame()
+
+    symbol = _map_ticker_to_12data(ticker)
+    
+    params = {
+        "symbol": symbol,
+        "interval": "1day",
+        "start_date": start.strftime("%Y-%m-%d"),
+        "end_date": end_exclusive.strftime("%Y-%m-%d"),
+        "apikey": TWELVEDATA_API_KEY,
+        "outputsize": 5000,
+        "timezone": "Asia/Tokyo" # 日本時間でリクエスト
+    }
+    
+    try:
+        res = requests.get(TWELVEDATA_BASE_URL, params=params)
+        data = res.json()
+        
+        if "status" in data and data["status"] == "error":
+            print(f"[12 Data Error] {ticker} (as {symbol}): {data.get('message')}")
+            return pd.DataFrame()
+        
+        if "values" not in data:
+            return pd.DataFrame()
+            
+        # DataFrame化
+        df = pd.DataFrame(data["values"])
+        
+        # カラム名のマッピング (12Data -> yfinance互換)
+        df = df.rename(columns={
+            "datetime": "Date",
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close"
+        })
+        
+        # 型変換
+        df["Date"] = pd.to_datetime(df["Date"])
+        cols = ["Open", "High", "Low", "Close"]
+        for c in cols:
+            df[c] = df[c].astype(float)
+            
+        df.set_index("Date", inplace=True)
+        # 降順で来る場合があるので昇順に直す
+        df.sort_index(inplace=True)
+        
+        # タイムゾーン処理 (12Dataでtimezone指定しているのでNaiveなJSTになっていることが多いが、念のため)
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("Asia/Tokyo")
+        else:
+            df.index = df.index.tz_convert("Asia/Tokyo")
+            
+        return df
+        
+    except Exception as e:
+        print(f"[12 Data Exception] {ticker}: {e}")
+        return pd.DataFrame()
+
+
+def get_history_unified(config: SeriesConfig, start: date, end_exclusive: date) -> pd.DataFrame:
+    """タイプに応じてデータソースを振り分け"""
+    
+    # Stock(個別株) と StockAverage(日経平均指数そのもの) は Yahoo
+    if config.stock_type in ["Stock", "StockAverage"]:
+        return fetch_yfinance(config.ticker, start, end_exclusive)
+    
+    # FX, Commodity, Index(CFD/先物) は 12 Data
+    elif config.stock_type in ["FX", "Commodity", "Index"]:
+        # 無料枠制限対策（1分間に8リクエスト = 7.5秒間隔）
+        # 安全を見て10秒待機
+        time.sleep(10) 
+        return fetch_12data(config.ticker, start, end_exclusive)
+    
+    # デフォルト
+    return fetch_yfinance(config.ticker, start, end_exclusive)
+
+
+# =========================
+# データ処理 & マージ
+# =========================
 
 def _index_to_dates(hist_index: pd.DatetimeIndex, tz: str) -> list[date]:
     idx = pd.DatetimeIndex(hist_index)
@@ -286,6 +396,7 @@ def history_to_calendar_rows(
     decimals: Optional[int],
     stock_type: str,
 ) -> pd.DataFrame:
+    # 指定期間のカレンダー（土日含む）生成
     cal = pd.date_range(pd.Timestamp(start), pd.Timestamp(up_to), freq="D")
     cal_dates = [d.date() for d in cal.to_pydatetime()]
 
@@ -324,7 +435,7 @@ def history_to_calendar_rows(
                 row["高値"] = float(h)
                 row["安値"] = float(l)
                 row["出来高"] = float(v) if v is not None else float("nan")
-                # 分割は0なら空欄にする（保存側でも空欄化）
+                
                 try:
                     sv = float(s) if s is not None else float("nan")
                 except Exception:
@@ -332,13 +443,15 @@ def history_to_calendar_rows(
                 row["株式分割"] = float("nan") if (pd.isna(sv) or sv == 0.0) else sv
             else:
                 o, c, h, l = hist_map[d]
-                # 固定桁のもの（例: 日経平均3桁）はここで丸めておく
+                
+                # ここで丸め処理を行う
                 if decimals is None:
                     row["始値"] = float(o)
                     row["終値"] = float(c)
                     row["高値"] = float(h)
                     row["安値"] = float(l)
                 else:
+                    # 固定桁指定がある場合
                     row["始値"] = round(float(o), decimals)
                     row["終値"] = round(float(c), decimals)
                     row["高値"] = round(float(h), decimals)
@@ -356,11 +469,13 @@ def merge_new_rows(existing_df: pd.DataFrame, new_rows: pd.DataFrame, date_forma
     base = base[out_cols].copy()
 
     existing_dates = set(base["日付"].astype(str).tolist())
+    # 既存にない日付だけ追加
     add = new_rows[~new_rows["日付"].isin(existing_dates)].copy()
     added = len(add)
 
     out = pd.concat([add, base], ignore_index=True)
     out["_date_dt"] = pd.to_datetime(out["日付"], format=date_format, errors="coerce")
+    # 日付降順でソート
     out = out.sort_values("_date_dt", ascending=False).drop(columns=["_date_dt"])
     out = out[out_cols]
     return out, added
@@ -371,45 +486,41 @@ def fill_csv_until_yesterday(
     today: Optional[date] = None,
     date_format: str = "%Y/%m/%d",
     quiet: bool = False,
-    throttle_sec: float = 0.2,
 ) -> int:
     if today is None:
         today = date.today()
     up_to = today - timedelta(days=1)
 
-    df = load_price_csv(config.csv_path, stock_type=config.stock_type, date_format=date_format)
-    
-    # 新規作成時はデータがないので、適当な古い日付を「最新」とみなして全期間取得させるか、
-    # あるいは開始日を指定する必要がありますが、ここでは「データなし＝昨日まで全部取る」動きになります
+    # CSV読み込み
+    try:
+        df = load_price_csv(config.csv_path, stock_type=config.stock_type, date_format=date_format)
+    except Exception as e:
+        print(f"[{config.name}] CSV読込エラー: {e}")
+        return 0
+
+    # 最新日付の特定
     if df.empty or "_date_dt" not in df.columns or df["_date_dt"].dropna().empty:
-         # データがない場合、とりあえず1年前から取得などのロジックが必要かもしれませんが
-         # 既存ロジックに合わせて「最新日付が取得できなければスキップ」せずに
-         # ひとまず適当な過去(例: 2000年)をセットするか、
-         # あるいは「データ無し」を許容する修正を入れる必要があります。
-         # 今回は「既存ファイルがある前提」のロジックを踏襲しつつ、
-         # エラーにならないよう直近の日付を返します。
-         latest = date(2000, 1, 1) # 仮
+         # データがない場合は適当な過去からスタート
+         # 必要に応じて日付を変更してください
+         latest = date(2024, 1, 1)
     else:
         latest = df["_date_dt"].max().date()
 
     if latest >= up_to:
         if not quiet:
-            print(f"[{config.name}] 追加不要")
-        out = df.drop(columns=["_date_dt"], errors="ignore")
-        save_price_csv(out, config.csv_path, config.decimals, config.stock_type)
+            print(f"[{config.name}] 更新不要 (最新: {latest})")
         return 0
 
     start = latest + timedelta(days=1)
     end_exclusive = up_to + timedelta(days=1)
 
-    if throttle_sec > 0:
-        time.sleep(throttle_sec)
-
     if not quiet:
-        dec_str = "variable" if config.decimals is None else str(config.decimals)
-        print(f"[{config.name}] {config.ticker} {start}〜{up_to} / type={config.stock_type} / decimals={dec_str}")
+        print(f"[{config.name}] 更新: {start} 〜 {up_to} (Source: {config.stock_type})")
 
-    hist = yfinance_history(config.ticker, start=start, end_exclusive=end_exclusive, interval=config.interval)
+    # データ取得 (Yahoo or 12Data)
+    hist = get_history_unified(config, start, end_exclusive)
+
+    # カレンダー形式に行生成（土日含む）
     new_rows = history_to_calendar_rows(
         hist=hist,
         start=start,
@@ -420,11 +531,12 @@ def fill_csv_until_yesterday(
         stock_type=config.stock_type,
     )
 
+    # マージして保存
     out, added = merge_new_rows(df, new_rows, date_format=date_format, stock_type=config.stock_type)
     save_price_csv(out, config.csv_path, config.decimals, config.stock_type)
 
     if not quiet:
-        print(f"[{config.name}] 追加 {added} 行 / 保存: {config.csv_path}")
+        print(f"[{config.name}] 追加 {added} 行 / 保存完了")
     return added
 
 
@@ -433,15 +545,20 @@ def fill_many(configs: Iterable[SeriesConfig], quiet: bool = False) -> None:
         try:
             fill_csv_until_yesterday(c, quiet=quiet)
         except Exception as e:
-            print(f"[{c.name}] ERROR: {e}")
+            print(f"[{c.name}] 処理中エラー: {e}")
 
 
 def main():
-    # 実行場所（相対パス基準）
+    # 実行カレントディレクトリを基準とする
     base_dir = Path(r".")
-    
-    # 変更点: .txt ではなく .json を読み込む
     stockfxlist_path = base_dir / "StockFxList.json"
+
+    print("=== Stock Update Script Start ===")
+    
+    if TWELVEDATA_API_KEY:
+        print("API Key: Detected")
+    else:
+        print("API Key: NOT Detected (FX/Commodity updates will skip)")
 
     try:
         configs = build_configs_from_json(base_dir, stockfxlist_path)
@@ -449,8 +566,9 @@ def main():
         print(f"設定読み込みエラー: {e}")
         return
 
-    print(f"更新対象（StockFxList.json）: {len(configs)} 件")
+    print(f"更新対象: {len(configs)} 件")
     fill_many(configs)
+    print("=== Finished ===")
 
 if __name__ == "__main__":
     main()
