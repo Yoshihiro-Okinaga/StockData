@@ -262,20 +262,7 @@ def _map_ticker_to_12data(yahoo_ticker: str) -> str:
     """
     Yahoo形式のティッカーを12 Data形式に変換するヘルパー
     例: USDJPY=X -> USD/JPY
-        GC=F -> XAU/USD (Gold)
     """
-    # 明示的なマッピング（商品先物・CFD系）
-    mapping = {
-        "GC=F": "XAU/USD",  # Gold
-        "SI=F": "XAG/USD",  # Silver
-        "CL=F": "WTI/USD",  # Crude Oil
-        "PL=F": "XPT/USD",  # Platinum
-        "NIY=F": "JPN225",  # Nikkei Futures (CFD) ※プロバイダにより異なる可能性あり
-        "YM=F": "DJI",      # Dow Futures (CFD)
-    }
-    if yahoo_ticker in mapping:
-        return mapping[yahoo_ticker]
-
     # 余計なサフィックスを削除
     symbol = yahoo_ticker.replace("=X", "").replace("=F", "")
 
@@ -302,6 +289,7 @@ def fetch_12data(ticker: str, start: date, end_exclusive: date) -> pd.DataFrame:
 
     symbol = _map_ticker_to_12data(ticker)
     
+    # 12 Dataは1リクエストで最大5000件
     params = {
         "symbol": symbol,
         "interval": "1day",
@@ -309,7 +297,7 @@ def fetch_12data(ticker: str, start: date, end_exclusive: date) -> pd.DataFrame:
         "end_date": end_exclusive.strftime("%Y-%m-%d"),
         "apikey": TWELVEDATA_API_KEY,
         "outputsize": 5000,
-        "timezone": "Asia/Tokyo" # 日本時間でリクエスト
+        "timezone": "Asia/Tokyo"
     }
     
     try:
@@ -326,7 +314,7 @@ def fetch_12data(ticker: str, start: date, end_exclusive: date) -> pd.DataFrame:
         # DataFrame化
         df = pd.DataFrame(data["values"])
         
-        # カラム名のマッピング (12Data -> yfinance互換)
+        # カラム名のマッピング
         df = df.rename(columns={
             "datetime": "Date",
             "open": "Open",
@@ -345,7 +333,7 @@ def fetch_12data(ticker: str, start: date, end_exclusive: date) -> pd.DataFrame:
         # 降順で来る場合があるので昇順に直す
         df.sort_index(inplace=True)
         
-        # タイムゾーン処理 (12Dataでtimezone指定しているのでNaiveなJSTになっていることが多いが、念のため)
+        # タイムゾーン処理
         if df.index.tz is None:
             df.index = df.index.tz_localize("Asia/Tokyo")
         else:
@@ -361,19 +349,15 @@ def fetch_12data(ticker: str, start: date, end_exclusive: date) -> pd.DataFrame:
 def get_history_unified(config: SeriesConfig, start: date, end_exclusive: date) -> pd.DataFrame:
     """タイプに応じてデータソースを振り分け"""
     
-    # Stock(個別株) と StockAverage(日経平均指数そのもの) は Yahoo
-    if config.stock_type in ["Stock", "StockAverage"]:
-        return fetch_yfinance(config.ticker, start, end_exclusive)
-    
-    # FX, Commodity, Index(CFD/先物) は 12 Data
-    elif config.stock_type in ["FX", "Commodity", "Index"]:
-        # 無料枠制限対策（1分間に8リクエスト = 7.5秒間隔）
-        # 安全を見て10秒待機
+    # FXのみ 12 Data を使用 (10秒待機付き)
+    if config.stock_type == "FX":
         time.sleep(10) 
         return fetch_12data(config.ticker, start, end_exclusive)
     
-    # デフォルト
-    return fetch_yfinance(config.ticker, start, end_exclusive)
+    # Stock, StockAverage, Commodity, Index は Yahoo を使用
+    # (12 Dataの無料枠ではCommodity/Indexの制限が厳しいため)
+    else:
+        return fetch_yfinance(config.ticker, start, end_exclusive)
 
 
 # =========================
@@ -396,7 +380,7 @@ def history_to_calendar_rows(
     decimals: Optional[int],
     stock_type: str,
 ) -> pd.DataFrame:
-    # 指定期間のカレンダー（土日含む）生成
+    # 指定期間のカレンダー生成（土日含む）
     cal = pd.date_range(pd.Timestamp(start), pd.Timestamp(up_to), freq="D")
     cal_dates = [d.date() for d in cal.to_pydatetime()]
 
@@ -415,6 +399,9 @@ def history_to_calendar_rows(
     rows = []
     for d in cal_dates:
         ts = pd.Timestamp(d)
+        is_weekend = ts.weekday() >= 5  # 土曜(5) または 日曜(6)
+
+        # デフォルトはNaN（空欄）
         row = {
             "日付": ts.strftime(date_format),
             "曜日": ts.strftime("%a"),
@@ -427,7 +414,9 @@ def history_to_calendar_rows(
             row["出来高"] = float("nan")
             row["株式分割"] = float("nan")
 
-        if d in hist_map:
+        # データが存在し、かつ「平日」である場合のみ値を入れる
+        # (土日であればデータがあっても無視して空欄にする)
+        if d in hist_map and not is_weekend:
             if stock_type == "Stock":
                 o, c, h, l, v, s = hist_map[d]
                 row["始値"] = float(o)
@@ -444,14 +433,13 @@ def history_to_calendar_rows(
             else:
                 o, c, h, l = hist_map[d]
                 
-                # ここで丸め処理を行う
+                # 丸め処理
                 if decimals is None:
                     row["始値"] = float(o)
                     row["終値"] = float(c)
                     row["高値"] = float(h)
                     row["安値"] = float(l)
                 else:
-                    # 固定桁指定がある場合
                     row["始値"] = round(float(o), decimals)
                     row["終値"] = round(float(c), decimals)
                     row["高値"] = round(float(h), decimals)
@@ -500,8 +488,6 @@ def fill_csv_until_yesterday(
 
     # 最新日付の特定
     if df.empty or "_date_dt" not in df.columns or df["_date_dt"].dropna().empty:
-         # データがない場合は適当な過去からスタート
-         # 必要に応じて日付を変更してください
          latest = date(2024, 1, 1)
     else:
         latest = df["_date_dt"].max().date()
@@ -517,10 +503,10 @@ def fill_csv_until_yesterday(
     if not quiet:
         print(f"[{config.name}] 更新: {start} 〜 {up_to} (Source: {config.stock_type})")
 
-    # データ取得 (Yahoo or 12Data)
+    # データ取得
     hist = get_history_unified(config, start, end_exclusive)
 
-    # カレンダー形式に行生成（土日含む）
+    # 行生成（土日空欄）
     new_rows = history_to_calendar_rows(
         hist=hist,
         start=start,
@@ -549,7 +535,6 @@ def fill_many(configs: Iterable[SeriesConfig], quiet: bool = False) -> None:
 
 
 def main():
-    # 実行カレントディレクトリを基準とする
     base_dir = Path(r".")
     stockfxlist_path = base_dir / "StockFxList.json"
 
