@@ -1,6 +1,8 @@
 name: Daily Python Data Update
 
 on:
+  push:
+  pull_request:
   schedule:
     # 日本時間 7:00 は UTC 22:00 です
     - cron: '0 22 * * 0-4'
