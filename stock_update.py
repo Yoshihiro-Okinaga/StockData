@@ -5,7 +5,8 @@ import time
 import os
 import requests
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional, Iterable
 
@@ -476,7 +477,7 @@ def fill_csv_until_yesterday(
     quiet: bool = False,
 ) -> int:
     if today is None:
-        today = date.today()
+        today = datetime.now(ZoneInfo("Asia/Tokyo")).date()
     up_to = today - timedelta(days=1)
 
     # CSV読み込み
