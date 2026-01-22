@@ -294,8 +294,8 @@ def fetch_12data(ticker: str, start: date, end_exclusive: date) -> pd.DataFrame:
     params = {
         "symbol": symbol,
         "interval": "1day",
-        "start_date": start.strftime("%Y-%m-%d"),
-        "end_date": end_exclusive.strftime("%Y-%m-%d"),
+        "start_date": start.strftime("%Y-%m-%d 00:00:00"),
+        "end_date": end_exclusive.strftime("%Y-%m-%d 23:59:59"),
         "apikey": TWELVEDATA_API_KEY,
         "outputsize": 5000,
         "timezone": "Asia/Tokyo"
