@@ -238,7 +238,7 @@ def save_price_csv(df: pd.DataFrame, csv_path: Path, decimals: Optional[int], st
                 fields = [str(r[c]) for c in out_cols]
             lines.append(",".join(fields))
 
-        csv_path.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
+        csv_path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8-sig")
         return
 
     # その他タイプの整形
