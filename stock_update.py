@@ -238,7 +238,8 @@ def save_price_csv(df: pd.DataFrame, csv_path: Path, decimals: Optional[int], st
                 fields = [str(r[c]) for c in out_cols]
             lines.append(",".join(fields))
 
-        csv_path.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8-sig")
+        newline = '\n' if os.name == 'nt' else '\r\n'
+        csv_path.write_text(newline.join(lines) + newline, encoding="utf-8-sig")
         return
 
     # その他タイプの整形
@@ -432,19 +433,19 @@ def history_to_calendar_rows(
                     sv = float("nan")
                 row["株式分割"] = float("nan") if (pd.isna(sv) or sv == 0.0) else sv
             else:
-                o, c, h, l = hist_map[d]
+                o, c, h, lo = hist_map[d]
                 
                 # 丸め処理
                 if decimals is None:
                     row["始値"] = float(o)
                     row["終値"] = float(c)
                     row["高値"] = float(h)
-                    row["安値"] = float(l)
+                    row["安値"] = float(lo)
                 else:
                     row["始値"] = round(float(o), decimals)
                     row["終値"] = round(float(c), decimals)
                     row["高値"] = round(float(h), decimals)
-                    row["安値"] = round(float(l), decimals)
+                    row["安値"] = round(float(lo), decimals)
 
         rows.append(row)
 
